@@ -1,5 +1,5 @@
 const int NUM_SLIDERS = 5;
-const int analogInputs[NUM_SLIDERS] = {A0, A1, A2, A3, A4};
+const int analogInputs[NUM_SLIDERS] = {A4, A3, A2, A1, A0};
 
 int analogSliderValues[NUM_SLIDERS];
 
