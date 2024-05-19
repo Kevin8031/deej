@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -143,28 +144,48 @@ func (d *Deej) run() {
 
 	// connect to the arduino for the first time
 	go func() {
-		if err := d.serial.Start(); err != nil {
-			d.logger.Warnw("Failed to start first-time serial connection", "error", err)
+		for {
+			if err := d.serial.Start(); err != nil {
+				d.logger.Warnw("Failed to start first-time serial connection", "error", err)
 
-			// If the port is busy, that's because something else is connected - notify and quit
-			if errors.Is(err, os.ErrPermission) {
-				d.logger.Warnw("Serial port seems busy, notifying user and closing",
-					"comPort", d.config.ConnectionInfo.COMPort)
+				// If the port is busy, that's because something else is connected - notify and quit
+				if errors.Is(err, os.ErrPermission) {
+					d.logger.Warnw("Serial port seems busy, notifying user and closing",
+						"comPort", d.config.ConnectionInfo.COMPort)
 
-				d.notifier.Notify(fmt.Sprintf("Can't connect to %s!", d.config.ConnectionInfo.COMPort),
-					"This serial port is busy, make sure to close any serial monitor or other deej instance.")
+					d.notifier.Notify(fmt.Sprintf("Can't connect to %s!", d.config.ConnectionInfo.COMPort),
+						"This serial port is busy, make sure to close any serial monitor or other deej instance.")
 
-				d.signalStop()
+					d.signalStop()
+					return
 
-				// also notify if the COM port they gave isn't found, maybe their config is wrong
-			} else if errors.Is(err, os.ErrNotExist) {
-				d.logger.Warnw("Provided COM port seems wrong, notifying user and closing",
-					"comPort", d.config.ConnectionInfo.COMPort)
+					// also notify if the COM port they gave isn't found, maybe their config is wrong
+					// and retry, maybe it got disconnected
+				} else if errors.Is(err, os.ErrNotExist) {
+					d.logger.Warnw("Provided COM port seems wrong, notifying user and retrying",
+						"comPort", d.config.ConnectionInfo.COMPort)
 
-				d.notifier.Notify(fmt.Sprintf("Can't connect to %s!", d.config.ConnectionInfo.COMPort),
-					"This serial port doesn't exist, check your configuration and make sure it's set correctly.")
+					d.notifier.Notify(fmt.Sprintf("Can't connect to %s!", d.config.ConnectionInfo.COMPort),
+						"This serial port doesn't exist, check your configuration and make sure it's set correctly.")
+					d.notifier.Notify(fmt.Sprintf("Can't connect to %s!", d.config.ConnectionInfo.COMPort),
+						"Retrying in 10 seconds")
 
-				d.signalStop()
+					<-time.After(10 * time.Second)
+
+					continue
+				}
+			}
+
+			select {
+			case <-d.stopChannel:
+				return
+			case <-d.serial.arduinoError:
+				// Attempt to reconnect if there is an error while
+				// reading the input from the arduino. maybe it got unplugged
+				d.serial.Stop()
+				<-d.serial.closedChannel
+
+				break
 			}
 		}
 	}()

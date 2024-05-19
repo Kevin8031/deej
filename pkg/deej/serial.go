@@ -24,10 +24,12 @@ type SerialIO struct {
 	deej   *Deej
 	logger *zap.SugaredLogger
 
-	stopChannel chan bool
-	connected   bool
-	connOptions serial.Mode
-	conn        io.ReadWriteCloser
+	stopChannel   chan bool
+	closedChannel chan bool
+	arduinoError  chan bool
+	connected     bool
+	connOptions   serial.Mode
+	conn          io.ReadWriteCloser
 
 	lastKnownNumSliders        int
 	currentSliderPercentValues []float32
@@ -52,6 +54,8 @@ func NewSerialIO(deej *Deej, logger *zap.SugaredLogger) (*SerialIO, error) {
 		deej:                deej,
 		logger:              logger,
 		stopChannel:         make(chan bool),
+		closedChannel:       make(chan bool),
+		arduinoError:        make(chan bool),
 		connected:           false,
 		conn:                nil,
 		sliderMoveConsumers: []chan SliderMoveEvent{},
@@ -195,6 +199,9 @@ func (sio *SerialIO) close(logger *zap.SugaredLogger) {
 
 	sio.conn = nil
 	sio.connected = false
+
+	// notify that the serial connection got closed
+	sio.closedChannel <- true
 }
 
 func (sio *SerialIO) readLine(logger *zap.SugaredLogger, reader *bufio.Reader) chan string {
@@ -209,7 +216,8 @@ func (sio *SerialIO) readLine(logger *zap.SugaredLogger, reader *bufio.Reader) c
 					logger.Warnw("Failed to read line from serial", "error", err, "line", line)
 				}
 
-				// just ignore the line, the read loop will stop after this
+				// notify that an error occurred
+				sio.arduinoError <- true
 				return
 			}
 
