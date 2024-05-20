@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"go.bug.st/serial"
+	"github.com/jacobsa/go-serial/serial"
 	"go.uber.org/zap"
 
 	"github.com/omriharel/deej/pkg/deej/util"
@@ -28,7 +28,7 @@ type SerialIO struct {
 	closedChannel chan bool
 	arduinoError  chan bool
 	connected     bool
-	connOptions   serial.Mode
+	connOptions   serial.OpenOptions
 	conn          io.ReadWriteCloser
 
 	lastKnownNumSliders        int
@@ -86,20 +86,21 @@ func (sio *SerialIO) Start() error {
 		minimumReadSize = 1
 	}
 
-	sio.connOptions = serial.Mode{
-		BaudRate: sio.deej.config.ConnectionInfo.BaudRate,
-		DataBits: 8,
-		StopBits: serial.OneStopBit,
+	sio.connOptions = serial.OpenOptions{
+		PortName:        sio.deej.config.ConnectionInfo.COMPort,
+		BaudRate:        uint(sio.deej.config.ConnectionInfo.BaudRate),
+		DataBits:        8,
+		StopBits:        1,
+		MinimumReadSize: uint(minimumReadSize),
 	}
 
 	sio.logger.Debugw("Attempting serial connection",
-		// "comPort", sio.connOptions.PortName,
+		"comPort", sio.connOptions.PortName,
 		"baudRate", sio.connOptions.BaudRate,
 		"minReadSize", minimumReadSize)
 
 	var err error
-	sio.logger.Debugw("file" + sio.deej.config.ConnectionInfo.COMPort)
-	sio.conn, err = serial.Open(sio.deej.config.ConnectionInfo.COMPort, &sio.connOptions)
+	sio.conn, err = serial.Open(sio.connOptions)
 	if err != nil {
 
 		// might need a user notification here, TBD
@@ -107,7 +108,7 @@ func (sio *SerialIO) Start() error {
 		return fmt.Errorf("open serial connection: %w", err)
 	}
 
-	namedLogger := sio.logger.Named(strings.ToLower(sio.deej.config.ConnectionInfo.COMPort))
+	namedLogger := sio.logger.Named(strings.ToLower(sio.connOptions.PortName))
 
 	namedLogger.Infow("Connected", "conn", sio.conn)
 	sio.connected = true
@@ -170,8 +171,8 @@ func (sio *SerialIO) setupOnConfigReload() {
 				}()
 
 				// if connection params have changed, attempt to stop and start the connection
-				if sio.deej.config.ConnectionInfo.COMPort != sio.comPort ||
-					sio.deej.config.ConnectionInfo.BaudRate != sio.connOptions.BaudRate {
+				if sio.deej.config.ConnectionInfo.COMPort != sio.connOptions.PortName ||
+					uint(sio.deej.config.ConnectionInfo.BaudRate) != sio.connOptions.BaudRate {
 
 					sio.logger.Info("Detected change in connection parameters, attempting to renew connection")
 					sio.Stop()
